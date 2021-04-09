@@ -1,0 +1,26 @@
+insert into follower
+(follower_user_id, following_user_id)
+values
+(8,1),
+(8,2),
+(8,5),
+(8,7),
+(7,1),
+(7,4),
+(7,8),
+(7,6);
+
+
+select 
+tweet.tweet_id,
+tweet.user_id,
+user.username,
+tweet.tweet,
+tweet.date_time
+from 
+follower
+left join tweet on tweet.user_id = follower.following_user_id
+left join user on follower.following_user_id = user.user_id
+where follower.follower_user_id = 8
+order by tweet.date_time desc
+limit 4;

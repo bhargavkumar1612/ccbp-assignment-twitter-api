@@ -10,7 +10,7 @@ values
 (7,8),
 (7,6);
 
-
+/// tweets of the people username is following
 select 
 tweet.tweet_id,
 tweet.user_id,
@@ -21,6 +21,50 @@ from
 follower
 left join tweet on tweet.user_id = follower.following_user_id
 left join user on follower.following_user_id = user.user_id
-where follower.follower_user_id = 8
+where follower.follower_user_id = (select user_id from user where username = "${request.username}")
 order by tweet.date_time desc
 limit 4;
+
+
+///people who sherlock_holems is following
+select 
+user.username
+from 
+follower
+left join user on follower.following_user_id = user.user_id
+where follower.follower_user_id = (select user_id from user where username = "sherlock_holems");
+
+//people who follows sherlock_holems
+select 
+user.username
+from 
+follower
+left join user on follower.follower_user_id = user.user_id
+where follower.following_user_id = (select user_id from user where username = "sherlock_holems");
+
+// tweet with tweet if if the tweet if of a follower
+select 
+tweet.tweet,
+count(like_id) as likes,
+count(reply_id) as replies,
+tweet.date_time
+from 
+follower
+left join tweet on tweet.user_id = follower.following_user_id
+left join user on follower.following_user_id = user.user_id
+left join like on tweet.tweet_id = like.tweet_id
+left join reply on tweet.tweet_id = reply.tweet_id
+where 
+follower.follower_user_id = (select user_id from user where username = "sherlock_holems")
+and tweet.tweet_id = 2
+
+select
+tweet.tweet,
+count(distinct like.like_id) as likes,
+count(distinct reply.reply_id) as replies,
+tweet.date_time
+from
+like
+left join reply on like.tweet_id = tweet.tweet_id
+left join tweet on tweet.tweet_id = like.tweet_id
+where tweet.tweet_id = 10;

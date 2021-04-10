@@ -4,7 +4,7 @@ const { open } = require("sqlite");
 const path = require("path");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-
+const { format } = require("date-fns");
 const dbPath = path.join(__dirname, "twitterClone.db");
 
 const app = express();
@@ -100,10 +100,6 @@ const tweetResponse = (dbObject) => ({
 
 // user tweets api
 app.get("/user/tweets/feed/", authenticateToken, async (request, response) => {
-  let userId = await db.get(
-    `select user_id from user where username = "${request.username}"`
-  );
-  userId = userId.user_id;
   const latestTweets = await db.all(`
     select 
     tweet.tweet_id,
@@ -115,9 +111,166 @@ app.get("/user/tweets/feed/", authenticateToken, async (request, response) => {
     follower
     left join tweet on tweet.user_id = follower.following_user_id
     left join user on follower.following_user_id = user.user_id
-    where follower.follower_user_id = ${userId}
+    where follower.follower_user_id = (select user_id from user where username = "${request.username}")
     order by tweet.date_time desc
     limit 4;
     `);
   response.send(latestTweets.map((item) => tweetResponse(item)));
 });
+
+// all the people who the logged user if following
+app.get("/user/following/", authenticateToken, async (request, response) => {
+  const following = await db.all(`
+    select 
+    user.username
+    from 
+    follower
+    left join user on follower.following_user_id = user.user_id
+    where follower.follower_user_id = (select user_id from user where username = "${request.username}");
+  `);
+  response.send(following);
+});
+
+// get all the followers of the logged in user
+
+app.get("/user/followers/", authenticateToken, async (request, response) => {
+  const followers = await db.all(`
+    select 
+    user.username
+    from 
+    follower
+    left join user on follower.follower_user_id = user.user_id
+    where follower.following_user_id = (select user_id from user where username = "${request.username}");
+    `);
+  response.send(followers);
+});
+
+const follows = async (request, response, next) => {
+  const { tweetId } = request.params;
+  let isFollowing = await db.get(`
+      select * from follower
+      where
+      follower_user_id =  (select user_id from user where username = "${request.username}")
+      and 
+      following_user_id = (select user.user_id from tweet natural join user where tweet_id = ${tweetId});
+      `);
+  if (isFollowing === undefined) {
+    response.status(401);
+    response.send("Invalid Request");
+  } else {
+    next();
+  }
+};
+
+// get tweet with tweet id
+app.get(
+  "/tweets/:tweetId/",
+  authenticateToken,
+  follows,
+  async (request, response) => {
+    const { tweetId } = request.params;
+    const { tweet, date_time } = await db.get(`
+      select tweet,date_time from tweet where tweet_id = ${tweetId};`);
+    const { likes } = await db.get(`
+select count(like_id) as likes from like where tweet_id = ${tweetId};`);
+    const { replies } = await db.get(`
+select count(reply_id) as replies from reply where tweet_id = ${tweetId};`);
+    response.send({ tweet, likes, replies, dateTime: date_time });
+  }
+);
+
+// get all likes of a tweet with tweet id if the user follows the tweeter
+
+app.get(
+  "/tweets/:tweetId/likes/",
+  authenticateToken,
+  follows,
+  async (request, response) => {
+    const { tweetId } = request.params;
+    const likedBy = await db.all(`
+    select user.username from
+    like natural join user
+    where tweet_id = ${tweetId};
+    `);
+    response.send({ likes: likedBy.map((item) => item.username) });
+  }
+);
+
+// get all replies of a tweet with tweet id if the user follows the tweeter
+
+app.get(
+  "/tweets/:tweetId/replies/",
+  authenticateToken,
+  follows,
+  async (request, response) => {
+    const { tweetId } = request.params;
+    const replies = await db.all(`
+    select user.username, reply.reply from
+    reply natural join user
+    where tweet_id = ${tweetId};
+    `);
+    response.send({ replies });
+  }
+);
+
+// get all the tweet by the logged user
+app.get("/user/tweets/", authenticateToken, async (request, response) => {
+  const myTweets = await db.all(`
+    select 
+    tweet.tweet,
+    count(distinct like.like_id) as likes,
+    count(distinct reply.reply_id) as replies,
+    tweet.date_time
+    from
+    tweet 
+    left join like on tweet.tweet_id = like.tweet_id
+    left join reply on tweet.tweet_id = reply.tweet_id
+    where tweet.user_id = (select user_id from user where username = "${request.username}");
+    `);
+  response.send(myTweets);
+});
+
+// post a tweet by the logged in user
+
+app.post("/user/tweets/", authenticateToken, async (request, response) => {
+  const { tweet } = request.body;
+  const { user_id } = await db.get(
+    `select user_id from user where username = "${request.username}"`
+  );
+  let dateTime = format(new Date(), "yyyy-MM-dd HH:mm:ss");
+  await db.run(`
+    Insert into tweet
+    (tweet, user_id, date_time)
+    values
+    ("${tweet}",${user_id}  , "${dateTime}")
+    `);
+  response.send("Created a Tweet");
+});
+
+// delete a tweet
+
+app.delete(
+  "/tweets/:tweetId/",
+  authenticateToken,
+  async (request, response) => {
+    const { tweetId } = request.params;
+    const userTweet = await db.get(`
+  select 
+  tweet_id, user_id
+  from 
+  tweet 
+  where tweet_id = ${tweetId}
+  and user_id = (select user_id from user where username = "${request.username}");
+  `);
+    if (userTweet === undefined) {
+      response.status(401);
+      response.send("Invalid Request");
+    } else {
+      await db.run(`
+        DELETE FROM tweet
+        WHERE tweet_id = ${tweetId}
+        `);
+      response.send("Tweet Removed");
+    }
+  }
+);

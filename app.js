@@ -4,7 +4,6 @@ const { open } = require("sqlite");
 const path = require("path");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { format } = require("date-fns");
 const dbPath = path.join(__dirname, "twitterClone.db");
 
 const app = express();
@@ -37,7 +36,7 @@ app.post("/register/", async (request, response) => {
         ("${username}","${hashedPassword}","${gender}","${name}");
         `);
       response.status(200);
-      response.send("Successful registration of the registrant");
+      response.send("User created successfully");
     } else {
       response.status(400);
       response.send("Password is too short");
@@ -72,12 +71,14 @@ app.post("/login/", async (request, response) => {
 
 function authenticateToken(request, response, next) {
   let jwtToken;
+
   const authorization = request.headers["authorization"];
   if (authorization !== undefined) {
     jwtToken = authorization.split(" ")[1];
   }
+
   if (jwtToken === undefined) {
-    response.send(401);
+    response.status(401);
     response.send("Invalid JWT Token");
   } else {
     jwt.verify(jwtToken, "MY_SECRET_KEY", async (error, payload) => {
@@ -122,7 +123,7 @@ app.get("/user/tweets/feed/", authenticateToken, async (request, response) => {
 app.get("/user/following/", authenticateToken, async (request, response) => {
   const following = await db.all(`
     select 
-    user.username
+    user.name
     from 
     follower
     left join user on follower.following_user_id = user.user_id
@@ -136,7 +137,7 @@ app.get("/user/following/", authenticateToken, async (request, response) => {
 app.get("/user/followers/", authenticateToken, async (request, response) => {
   const followers = await db.all(`
     select 
-    user.username
+    user.name
     from 
     follower
     left join user on follower.follower_user_id = user.user_id
@@ -205,7 +206,7 @@ app.get(
   async (request, response) => {
     const { tweetId } = request.params;
     const replies = await db.all(`
-    select user.username, reply.reply from
+    select user.name, reply.reply from
     reply natural join user
     where tweet_id = ${tweetId};
     `);
@@ -222,12 +223,18 @@ app.get("/user/tweets/", authenticateToken, async (request, response) => {
     count(distinct reply.reply_id) as replies,
     tweet.date_time
     from
-    tweet 
+    tweet
     left join like on tweet.tweet_id = like.tweet_id
     left join reply on tweet.tweet_id = reply.tweet_id
-    where tweet.user_id = (select user_id from user where username = "${request.username}");
+    where tweet.user_id = (select user_id from user where username = "${request.username}")
+    group by tweet.tweet_id;
     `);
-  response.send(myTweets);
+  response.send(
+    myTweets.map((item) => {
+      const { date_time, ...rest } = item;
+      return { ...rest, dateTime: date_time };
+    })
+  );
 });
 
 // post a tweet by the logged in user
@@ -237,12 +244,11 @@ app.post("/user/tweets/", authenticateToken, async (request, response) => {
   const { user_id } = await db.get(
     `select user_id from user where username = "${request.username}"`
   );
-  let dateTime = format(new Date(), "yyyy-MM-dd HH:mm:ss");
   await db.run(`
     Insert into tweet
-    (tweet, user_id, date_time)
+    (tweet, user_id)
     values
-    ("${tweet}",${user_id}  , "${dateTime}")
+    ("${tweet}",${user_id});
     `);
   response.send("Created a Tweet");
 });
@@ -274,5 +280,4 @@ app.delete(
     }
   }
 );
-
 module.exports = app;

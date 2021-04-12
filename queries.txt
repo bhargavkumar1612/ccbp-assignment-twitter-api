@@ -68,3 +68,6 @@ like
 left join reply on like.tweet_id = tweet.tweet_id
 left join tweet on tweet.tweet_id = like.tweet_id
 where tweet.tweet_id = 10;
+
+
+
